@@ -6,7 +6,6 @@ from openai import OpenAI
 client = OpenAI()
 
 
-openai.api_key = 'sk-proj-jaR854N7GbDhL2vqZkmtT3BlbkFJfgST2hPIpMmMF5OXDIh2'
 
 
 def record_audio(output_file_path, record_seconds=5):
@@ -64,3 +63,5 @@ def gpt_response(text):
 
 
 record_audio("sound.wav", record_seconds=5)
+texx = speech_to_text("sound.wav")
+print(texx)
