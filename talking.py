@@ -5,7 +5,7 @@ import webrtcvad
 from dotenv import load_dotenv
 import openai
 from google.cloud import texttospeech
-
+import langdetect
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,6 +20,7 @@ print(f"Using OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
 
 # Set the API key explicitly
 openai.api_key = openai_api_key
+    
 
 def record_audio(output_file_path, record_seconds=5):
     chunk = 1024  # Record in chunks of 1024 samples
@@ -81,13 +82,13 @@ def text_to_speech(text, output_file_path):
     text (str): The text to be converted to speech.
     output_file_path (str): The path to save the output audio file.
     """
+    
     client = texttospeech.TextToSpeechClient()
 
     synthesis_input = texttospeech.SynthesisInput(text=text)
 
-    voice = texttospeech.VoiceSelectionParams(
-        language_code="en-US",
-        ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+    voice = texttospeech.VoiceSelectionParams(language_code = langdetect.detect(text),
+                                              ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
     )
 
     audio_config = texttospeech.AudioConfig(
@@ -111,5 +112,6 @@ print("Transcribed Text:", text)
 response_text = gpt_response(text)
 print("GPT Response:", response_text)
 
-text_to_speech(response_text, "answer.wav")
+text_to_speech(response_text, "output.mp3")
+
 
