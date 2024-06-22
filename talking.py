@@ -6,6 +6,7 @@ import os
 from openai import OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+
 def record_audio(output_file_path, record_seconds=5):
     chunk = 1024  # Record in chunks of 1024 samples
     format = pyaudio.paInt16  # 16 bits per sample
