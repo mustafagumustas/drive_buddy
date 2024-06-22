@@ -4,7 +4,12 @@ import wave
 import webrtcvad
 import os
 from openai import OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize OpenAI client
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    raise ValueError("No OpenAI API key found in environment variables.")
+
+client = openai.OpenAI(api_key=openai_api_key)
 
 
 def record_audio(output_file_path, record_seconds=5):
