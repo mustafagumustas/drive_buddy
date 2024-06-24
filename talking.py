@@ -1,15 +1,13 @@
 import os
 import pyaudio
 import wave
-import webrtcvad
 from dotenv import load_dotenv
+from openai import OpenAI
 import openai
-from google.cloud import texttospeech
-import langdetect
 
 # Load environment variables from .env file
 load_dotenv()
-
+client = OpenAI()
 # Retrieve API key from environment variable
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
@@ -19,8 +17,7 @@ if not openai_api_key:
 print(f"Using OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
 
 # Set the API key explicitly
-openai.api_key = openai_api_key
-    
+
 
 def record_audio(output_file_path, record_seconds=5):
     chunk = 1024  # Record in chunks of 1024 samples
@@ -56,62 +53,44 @@ def record_audio(output_file_path, record_seconds=5):
         wf.setframerate(rate)
         wf.writeframes(b''.join(frames))
 
+
 def speech_to_text(audio_file_path):
-    with open(audio_file_path, "rb") as audio_file:
-        transcription = openai.Audio.transcribe(
+    
+    with open(audio_file_path, "rb") as f:
+        response = client.audio.transcriptions.create(
             model="whisper-1",
-            file=audio_file
+            file=f
         )
-    return transcription['text']
+    return response.text
+
 
 def gpt_response(text):
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": text}
-        ]
-    )
-    return response.choices[0].message['content']
+    response = openai.chat.completions.create(model="gpt-4",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": text}
+    ])
+    return response.choices[0].message.content
+
 
 def text_to_speech(text, output_file_path):
-    """
-    Converts text to speech and saves it as an audio file.
-
-    Args:
-    text (str): The text to be converted to speech.
-    output_file_path (str): The path to save the output audio file.
-    """
-    
-    client = texttospeech.TextToSpeechClient()
-
-    synthesis_input = texttospeech.SynthesisInput(text=text)
-
-    voice = texttospeech.VoiceSelectionParams(language_code = langdetect.detect(text),
-                                              ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+    response = openai.audio.speech.create(
+        model="tts-1",
+        voice="alloy",
+        input=text
     )
-
-    audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3
-    )
-
-    response = client.synthesize_speech(
-        input=synthesis_input, voice=voice, audio_config=audio_config
-    )
-
-    with open(output_file_path, "wb") as out:
-        out.write(response.audio_content)
-        print(f'Audio content written to file "{output_file_path}"')
+    with open(output_file_path, "wb") as f:
+        f.write(response.content)
 
 
 # Example usage
-record_audio("sound.wav", record_seconds=5)
-text = speech_to_text("sound.wav")
+record_audio("input.wav", record_seconds=5)
+text = speech_to_text("input.wav")
 print("Transcribed Text:", text)
 
 response_text = gpt_response(text)
 print("GPT Response:", response_text)
 
-text_to_speech(response_text, "output.mp3")
+text_to_speech(response_text, "output.wav")
 
 
