@@ -16,8 +16,6 @@ if not openai_api_key:
 # Debug print to verify the API key
 print(f"Using OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
 
-# Set the API key explicitly
-
 
 def record_audio(output_file_path, record_seconds=5):
     chunk = 1024  # Record in chunks of 1024 samples
