@@ -1,73 +1,74 @@
 import pyaudio
-import webrtcvad
-import collections
-import openai
-import os
-from dotenv import load_dotenv
-from threading import Thread
-import time
-import io
 import wave
-client = openai.OpenAI()
-# Load environment variables from .env file
-load_dotenv()
+import numpy as np
 
-# Retrieve API key from environment variable
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    raise ValueError("No OpenAI API key found in environment variables.")
+class SpeechRecorder:
+    def __init__(self):
+        self.chunk = 1024  # Record in chunks of 1024 samples
+        self.sample_format = pyaudio.paInt16  # 16 bits per sample
+        self.channels = 1
+        self.rate = 16000  # Record at 16000 samples per second
+        self.silence_threshold = 500  # Adjust this threshold as needed
+        self.silence_duration = 2  # Seconds of silence before considering speech finished
+        self.audio = pyaudio.PyAudio()
 
+    def is_silent(self, data):
+        """Returns 'True' if below the silence threshold"""
+        return np.frombuffer(data, dtype=np.int16).max() < self.silence_threshold
 
-def recognize_speech_from_mic():
-    """Capture audio from the microphone and convert it to text using OpenAI API."""
-    # Set up audio recording parameters
-    FORMAT = pyaudio.paInt16
-    CHANNELS = 1
-    RATE = 44100
-    CHUNK = 1024
-    RECORD_SECONDS = 5
+    def record(self):
+        stream = self.audio.open(format=self.sample_format,
+                                 channels=self.channels,
+                                 rate=self.rate,
+                                 frames_per_buffer=self.chunk,
+                                 input=True)
 
-    # Initialize PyAudio
-    audio = pyaudio.PyAudio()
+        print("Adjusting for ambient noise...")
+        print("Ready to record. Start speaking...")
 
-    # Start recording
-    stream = audio.open(format=FORMAT, channels=CHANNELS,
-                        rate=RATE, input=True,
-                        frames_per_buffer=CHUNK)
-    print("Listening...")
+        file_counter = 0
 
-    frames = []
+        while True:
+            frames = []
+            silent_chunks = 0
+            is_recording = False
 
-    for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-        data = stream.read(CHUNK)
-        frames.append(data)
+            while True:
+                data = stream.read(self.chunk)
+                frames.append(data)
 
-    print("Finished recording.")
+                if self.is_silent(data):
+                    silent_chunks += 1
+                else:
+                    silent_chunks = 0
+                    is_recording = True
 
-    # Stop recording
-    stream.stop_stream()
-    stream.close()
-    audio.terminate()
+                if is_recording and silent_chunks > (self.silence_duration * self.rate / self.chunk):
+                    print(f"Speech chunk {file_counter + 1} finished.")
+                    break
 
-    # Convert audio data to bytes
-    audio_data = b''.join(frames)
+            if is_recording:
+                self.save_audio(frames, file_counter)
+                file_counter += 1
 
-    # Convert bytes data to audio file
-    audio_file = io.BytesIO(audio_data)
-    audio_file.name = "audio.wav"
+    def save_audio(self, frames, counter):
+        file_name = f"output_{counter}.wav"
+        wf = wave.open(file_name, 'wb')
+        wf.setnchannels(self.channels)
+        wf.setsampwidth(self.audio.get_sample_size(self.sample_format))
+        wf.setframerate(self.rate)
+        wf.writeframes(b''.join(frames))
+        wf.close()
+        print(f"Audio saved as {file_name}")
 
-    # Send audio to OpenAI Whisper API
-    # response = client.audio.transcriptions.create()
-
-    return audio_file # response # removed the response, api excepts only audio file
-
-def main():
-    response = recognize_speech_from_mic()
-    
-    if "text" in response:
-        print("You said: {}".format(response["text"]))
-    else:
-        print("Error: {}".format(response))
+    def close(self):
+        self.audio.terminate()
 
 if __name__ == "__main__":
-    main()
+    recorder = SpeechRecorder()
+    try:
+        recorder.record()
+    except KeyboardInterrupt:
+        print("Recording stopped by user.")
+    finally:
+        recorder.close()
