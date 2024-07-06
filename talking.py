@@ -1,6 +1,7 @@
 import os
 import pyaudio
 import wave
+import numpy as np
 from dotenv import load_dotenv
 from openai import OpenAI
 import openai
@@ -16,79 +17,103 @@ if not openai_api_key:
 # Debug print to verify the API key
 print(f"Using OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
 
+class SpeechRecorder:
+    def __init__(self):
+        self.chunk = 1024  # Record in chunks of 1024 samples
+        self.sample_format = pyaudio.paInt16  # 16 bits per sample
+        self.channels = 1
+        self.rate = 16000  # Record at 16000 samples per second
+        self.silence_threshold = 800  # Adjust this threshold as needed
+        self.silence_duration = 2  # Seconds of silence before considering speech finished
+        self.audio = pyaudio.PyAudio()
+        self.conversation_history = []
 
-def record_audio(output_file_path, record_seconds=5):
-    chunk = 1024  # Record in chunks of 1024 samples
-    format = pyaudio.paInt16  # 16 bits per sample
-    channels = 1  # Number of audio channels
-    rate = 44100  # Record at 44100 samples per second
+    def is_silent(self, data):
+        """Returns 'True' if below the silence threshold"""
+        return np.frombuffer(data, dtype=np.int16).max() < self.silence_threshold
 
-    p = pyaudio.PyAudio()
+    def record(self):
+        stream = self.audio.open(format=self.sample_format,
+                                 channels=self.channels,
+                                 rate=self.rate,
+                                 frames_per_buffer=self.chunk,
+                                 input=True)
 
-    stream = p.open(format=format,
-                    channels=channels,
-                    rate=rate,
-                    input=True,
-                    frames_per_buffer=chunk)
+        print("Adjusting for ambient noise...")
+        print("Ready to record. Start speaking...")
 
-    print("Recording...")
+        file_counter = 0
 
-    frames = []
+        while True:
+            frames = []
+            silent_chunks = 0
+            is_recording = False
 
-    for _ in range(0, int(rate / chunk * record_seconds)):
-        data = stream.read(chunk)
-        frames.append(data)
+            while True:
+                try:
+                    data = stream.read(self.chunk, exception_on_overflow=False)
+                except IOError as e:
+                    print(f"Error: {e}")
+                    continue
 
-    print("Finished recording.")
+                frames.append(data)
 
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
+                if self.is_silent(data):
+                    silent_chunks += 1
+                else:
+                    silent_chunks = 0
+                    is_recording = True
 
-    with wave.open(output_file_path, 'wb') as wf:
-        wf.setnchannels(channels)
-        wf.setsampwidth(p.get_sample_size(format))
-        wf.setframerate(rate)
+                if is_recording and silent_chunks > (self.silence_duration * self.rate / self.chunk):
+                    print(f"Speech chunk {file_counter + 1} finished.")
+                    break
+
+            if is_recording:
+                file_name = self.save_audio(frames, file_counter)
+                user_text = self.process_audio(file_name)
+                print(f"User asked: {user_text}")
+                self.conversation_history.append({"role": "user", "content": user_text})
+                response_text = self.gpt_response()
+                print(f"Response: {response_text}")
+                self.conversation_history.append({"role": "assistant", "content": response_text})
+                file_counter += 1
+
+    def save_audio(self, frames, counter):
+        file_name = f"output_{counter}.wav"
+        wf = wave.open(file_name, 'wb')
+        wf.setnchannels(self.channels)
+        wf.setsampwidth(self.audio.get_sample_size(self.sample_format))
+        wf.setframerate(self.rate)
         wf.writeframes(b''.join(frames))
+        wf.close()
+        print(f"Audio saved as {file_name}")
+        return file_name
 
+    def process_audio(self, audio_file_path):
+        with open(audio_file_path, "rb") as f:
+            response = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f
+            )
+        return response.text
 
-def speech_to_text(audio_file_path):
-    
-    with open(audio_file_path, "rb") as f:
-        response = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f
+    def gpt_response(self):
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+            ] + self.conversation_history
         )
-    return response.text
+        return response.choices[0].message.content
 
+    def close(self):
+        self.audio.terminate()
 
-def gpt_response(text):
-    response = openai.chat.completions.create(model="gpt-4",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": text}
-    ])
-    return response.choices[0].message.content
-
-
-def text_to_speech(text, output_file_path):
-    response = openai.audio.speech.create(
-        model="tts-1",
-        voice="alloy",
-        input=text
-    )
-    with open(output_file_path, "wb") as f:
-        f.write(response.content)
-
-
-# Example usage
-record_audio("input.wav", record_seconds=5)
-text = speech_to_text("input.wav")
-print("Transcribed Text:", text)
-
-response_text = gpt_response(text)
-print("GPT Response:", response_text)
-
-text_to_speech(response_text, "output.wav")
-
-
+if __name__ == "__main__":
+    recorder = SpeechRecorder()
+    try:
+        recorder.record()
+    except KeyboardInterrupt:
+        print("Recording stopped by user.")
+    finally:
+        recorder.close()
