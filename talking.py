@@ -23,14 +23,22 @@ class SpeechRecorder:
         self.sample_format = pyaudio.paInt16  # 16 bits per sample
         self.channels = 1
         self.rate = 16000  # Record at 16000 samples per second
-        self.silence_threshold = 800  # Adjust this threshold as needed
-        self.silence_duration = 2  # Seconds of silence before considering speech finished
+        self.silence_threshold = 500  # Adjust this threshold as needed
+        self.silence_duration = 1.75  # Seconds of silence before considering speech finished
         self.audio = pyaudio.PyAudio()
         self.conversation_history = []
+        self.noise_levels = []
 
     def is_silent(self, data):
         """Returns 'True' if below the silence threshold"""
-        return np.frombuffer(data, dtype=np.int16).max() < self.silence_threshold
+        max_value = np.frombuffer(data, dtype=np.int16).max()
+        if not self.noise_levels:  # If noise_levels is empty, we are still calibrating
+            self.noise_levels.append(max_value)
+        return max_value < self.silence_threshold
+
+    def adjust_silence_threshold(self):
+        if self.noise_levels:
+            self.silence_threshold = np.mean(self.noise_levels) + 100  # Add buffer to average noise level
 
     def record(self):
         stream = self.audio.open(format=self.sample_format,
@@ -43,6 +51,7 @@ class SpeechRecorder:
         print("Ready to record. Start speaking...")
 
         file_counter = 0
+        calibrating = True
 
         while True:
             frames = []
@@ -58,7 +67,14 @@ class SpeechRecorder:
 
                 frames.append(data)
 
-                if self.is_silent(data):
+                if calibrating:
+                    self.noise_levels.append(np.frombuffer(data, dtype=np.int16).max())
+                    if len(self.noise_levels) > 50:  # Collect 50 chunks of ambient noise
+                        calibrating = False
+                        self.adjust_silence_threshold()
+                        print(f"Calibrated silence threshold: {self.silence_threshold}")
+
+                if self.is_silent(data) and not calibrating:
                     silent_chunks += 1
                 else:
                     silent_chunks = 0
