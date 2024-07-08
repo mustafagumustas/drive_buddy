@@ -6,9 +6,13 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import openai
 
+client = OpenAI()
+from pinecone import Pinecone, ServerlessSpec
+
 # Load environment variables from .env file
 load_dotenv()
 client = OpenAI()
+
 # Retrieve API key from environment variable
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
@@ -16,6 +20,26 @@ if not openai_api_key:
 
 # Debug print to verify the API key
 print(f"Using OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
+
+# Initialize Pinecone client
+pinecone_api_key = os.getenv("PINECONE_API_KEY")
+if not pinecone_api_key:
+    raise ValueError("No Pinecone API key found in environment variables.")
+
+pc = Pinecone(api_key=pinecone_api_key)
+
+# Connect to Pinecone index
+if 'user1' not in pc.list_indexes().names():
+    pc.create_index(
+        name='user1', 
+        dimension=1536, 
+        metric='cosine',
+        spec=ServerlessSpec(
+            cloud='aws',
+            region='us-east-1'
+        )
+    )
+index = pc.Index('user1')
 
 class SpeechRecorder:
     def __init__(self):
@@ -94,6 +118,9 @@ class SpeechRecorder:
                 self.conversation_history.append({"role": "assistant", "content": response_text})
                 file_counter += 1
 
+                # Upsert vectors to Pinecone
+                self.upsert_to_pinecone(file_counter, user_text)
+
     def save_audio(self, frames, counter):
         file_name = f"output_{counter}.wav"
         wf = wave.open(file_name, 'wb')
@@ -121,6 +148,19 @@ class SpeechRecorder:
             ] + self.conversation_history
         )
         return response.choices[0].message.content
+
+    def upsert_to_pinecone(self, vector_id, text):
+        embedding_response = client.embeddings.create(model="text-embedding-ada-002",
+        input=[text])
+        embedding = embedding_response.data[0].embedding
+
+
+        # Upsert the embedding to Pinecone
+        index.upsert(vectors=[{
+            "id": str(vector_id),
+            "values": embedding
+        }])
+        print(f"Upserted vector ID {vector_id} to Pinecone")
 
     def close(self):
         self.audio.terminate()
