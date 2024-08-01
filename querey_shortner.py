@@ -94,7 +94,7 @@ class SpeechRecorder:
                  "functional_data": {
                     "bad_habit_frequancy": "low",
                     "concern": "high stress",
-                    "sputum_color": "worries",
+                    "sputum_color": "worries
                     "current_activity": "taking art classes",
                     "desire": "becoming an artist"
                 }
@@ -134,6 +134,7 @@ class SpeechRecorder:
         namespace=namespace
     )
 
+    
 
     def retrieve_and_print_metadata(self, user_id):
         namespace = f"user_{user_id}_namespace"
