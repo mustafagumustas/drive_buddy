@@ -2,12 +2,11 @@ import os
 import pyaudio
 import wave
 import numpy as np
+import openai
 from dotenv import load_dotenv
 from openai import OpenAI
-import openai
 
-client = OpenAI()
-from pinecone import Pinecone, ServerlessSpec
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -15,31 +14,11 @@ client = OpenAI()
 
 # Retrieve API key from environment variable
 openai_api_key = os.getenv("OPENAI_API_KEY")
-if not openai_api_key:
-    raise ValueError("No OpenAI API key found in environment variables.")
 
 # Debug print to verify the API key
 print(f"Using OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
 
-# Initialize Pinecone client
-pinecone_api_key = os.getenv("PINECONE_API_KEY")
-if not pinecone_api_key:
-    raise ValueError("No Pinecone API key found in environment variables.")
 
-pc = Pinecone(api_key=pinecone_api_key)
-
-# Connect to Pinecone index
-if 'user1' not in pc.list_indexes().names():
-    pc.create_index(
-        name='user1', 
-        dimension=1536, 
-        metric='cosine',
-        spec=ServerlessSpec(
-            cloud='aws',
-            region='us-east-1'
-        )
-    )
-index = pc.Index('user1')
 
 class SpeechRecorder:
     def __init__(self):
@@ -65,6 +44,7 @@ class SpeechRecorder:
             self.silence_threshold = np.mean(self.noise_levels) + 100  # Add buffer to average noise level
 
     def record(self):
+        # this function gonna be used to record the audio when the user speaks
         stream = self.audio.open(format=self.sample_format,
                                  channels=self.channels,
                                  rate=self.rate,
@@ -113,13 +93,13 @@ class SpeechRecorder:
                 user_text = self.process_audio(file_name)
                 print(f"User asked: {user_text}")
                 self.conversation_history.append({"role": "user", "content": user_text})
+
+                # below is gonna be changed to mem0 in the future
                 response_text = self.gpt_response()
                 print(f"Response: {response_text}")
+                self.gpt_speach(response_text)
                 self.conversation_history.append({"role": "assistant", "content": response_text})
                 file_counter += 1
-
-                # Upsert vectors to Pinecone
-                self.upsert_to_pinecone(file_counter, user_text)
 
     def save_audio(self, frames, counter):
         file_name = f"output_{counter}.wav"
@@ -133,6 +113,7 @@ class SpeechRecorder:
         return file_name
 
     def process_audio(self, audio_file_path):
+        # Speech to text of the user
         with open(audio_file_path, "rb") as f:
             response = client.audio.transcriptions.create(
                 model="whisper-1",
@@ -142,25 +123,23 @@ class SpeechRecorder:
 
     def gpt_response(self):
         response = openai.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
             ] + self.conversation_history
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content    # this will the text that will be spoken as response of the gpt
 
-    def upsert_to_pinecone(self, vector_id, text):
-        embedding_response = client.embeddings.create(model="text-embedding-ada-002",
-        input=[text])
-        embedding = embedding_response.data[0].embedding
-
-
-        # Upsert the embedding to Pinecone
-        index.upsert(vectors=[{
-            "id": str(vector_id),
-            "values": embedding
-        }])
-        print(f"Upserted vector ID {vector_id} to Pinecone")
+    def gpt_speach(self, gpt_response_text):
+        with client.audio.speech.with_streaming_response.create(
+            model="tts-1",
+            voice="alloy",
+            input=gpt_response_text
+        ) as response:
+            response.stream_to_file("speech.wav")
+            # audio_length = wave.open("speech.wav", 'rb').getnframes() / wave.open("speech.wav", 'rb').getframerate()
+            # print(f"Audio file length: {audio_length} seconds") # getting error here trying to pause the script as the duration of the response
+            print("Audio response saved as speech.wav")
 
     def close(self):
         self.audio.terminate()
@@ -173,3 +152,4 @@ if __name__ == "__main__":
         print("Recording stopped by user.")
     finally:
         recorder.close()
+
