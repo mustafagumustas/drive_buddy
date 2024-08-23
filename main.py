@@ -7,8 +7,12 @@ from qdrant_client import QdrantClient
 from pprint import pprint
 from mem0 import Memory
 
+from voice_activity_detection import SpeechRecorder
+
+
 llm = ChatOpenAI(model="gpt-4o-mini")
-client = QdrantClient(path="/Users/mustafagumustas/travel_buddy/")
+# client = QdrantClient(path="/Users/mustafagumustas/travel_buddy/")
+client = QdrantClient(":memory:")
 
 config = {
     "vector_store": {
@@ -74,6 +78,7 @@ def run_conversation(user_input: str, mem0_user_id: str):
         for value in event.values():
             if value.get("messages"):
                 print("\n\nDrive Buddy:", value["messages"][-1].content)
+                recorder.gpt_speech(value["messages"][-1].content)
                 return  # Exit after printing the response
 
 
@@ -81,11 +86,21 @@ if __name__ == "__main__":
     print("Welcome to Drive Buddy! How can I assist you today?\n")
     mem0_user_id = "mustafa_gumustas"
     while True:
-        print("\n")
-        pprint(mem0.get_all())
-        user_input = input("\nYou: ")
+        
+        
+        recorder = SpeechRecorder()
+        try:
+            text = recorder.record()
+            print(f"Transcribed text: {text}")
+            pprint(mem0.get_all())
+            # recorder.close()
+        finally:
+            recorder.close()
+        user_input = text
+        
         if user_input.lower() in ['quit', 'exit', 'bye']:
             print("\nDrive Buddy: Thank you for contacting us. Have a great day!")
             break
-        run_conversation(user_input, mem0_user_id)
+        else:
+            run_conversation(user_input, mem0_user_id)
 

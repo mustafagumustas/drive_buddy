@@ -3,6 +3,9 @@ import numpy as np
 import pyaudio
 import wave
 import io
+import openai
+from pydub import AudioSegment
+from pydub.playback import play
 
 client = OpenAI()
 
@@ -84,9 +87,24 @@ class SpeechRecorder:
             user_text = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_buffer
-            )
+            )# Stop and close the stream
+            
             return user_text.text
+        self.audio.close()  
+        self.audio.terminate()
 
     def close(self):
         self.audio.terminate()
 
+    def gpt_speech(self, gpt_response_text):
+        with client.audio.speech.with_streaming_response.create(
+            model="tts-1",
+            voice="alloy",
+            input=gpt_response_text
+        ) as response:
+            response.stream_to_file("speech.wav")
+
+        # play the speech.wav
+        audio = AudioSegment.from_file("speech.wav")
+        play(audio)
+        
