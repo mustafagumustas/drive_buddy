@@ -1,4 +1,5 @@
 from spotipy.oauth2 import SpotifyClientCredentials
+from langchain.agents import tool
 from spotipy.oauth2 import SpotifyOAuth
 from pprint import pprint
 import pandas as pd
@@ -39,20 +40,33 @@ def find_track_uri(track_name):
 
 
 # Play a track on the active device
-def play_track_on_device(track_name):
+@tool
+def play_track_on_device(track_name: str):
+    "start playing requested track"
+    print(f"Tool triggered: Playing '{track_name}' on the active device.")
+
+    # Step 1: Get the active device
     active_device_id = get_active_device()
     if not active_device_id:
         print("No active device found.")
-        return
+        return {"message": "No active device found."}
 
+    # Step 2: Find the track URI
     track_uri = find_track_uri(track_name)
     if not track_uri:
         print(f"Track '{track_name}' not found.")
-        return
+        return {"message": f"Track '{track_name}' not found."}
 
-    # Start playing the track
-    sp.start_playback(device_id=active_device_id, uris=[track_uri])
-    print(f"Playing '{track_name}' on the active device.")
+    # Step 3: Start playback on the active device
+    try:
+        print(
+            f"Attempting to start playback on device {active_device_id} for track URI {track_uri}"
+        )
+        sp.start_playback(device_id=active_device_id, uris=[track_uri])
+        return {"message": f"Playing '{track_name}' on the active device."}
+    except Exception as e:
+        print(f"Error during playback: {e}")
+        return {"message": f"Error during playback: {e}"}
 
 
 # # Find the latest used device
