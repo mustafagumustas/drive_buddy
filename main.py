@@ -1,7 +1,10 @@
+from langchain.agents import AgentExecutor, create_tool_calling_agent 
+
+from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langgraph.graph.message import add_messages
-from langchain.agents import AgentExecutor, create_tool_calling_agent, tool
+from langchain.memory import ConversationBufferMemory
 from langchain_core.prompts import ChatPromptTemplate
+from langgraph.graph.message import add_messages
 from typing import Annotated, TypedDict, List
 from langgraph.graph import StateGraph, START
 from langchain_openai import ChatOpenAI
@@ -15,6 +18,8 @@ import os
 
 from music_manager import play_track_on_device
 from voice_activity_detection import SpeechRecorder
+
+first_run = True
 
 llm = ChatOpenAI(model="gpt-4o-mini")
 drive_buddy_main_prompt = """You are a drive buddy application for drivers, a co-pilot.
@@ -59,8 +64,8 @@ Safety Check:
 Engagement:
 "Want to hear a fun fact about your car? The Mustang was first introduced in 1964 and has a fascinating history…"
 "Feeling tired? Let's do a quick alertness exercise together."
+
                                    """
-# client = QdrantClient(path="/Users/mustafagumustas/travel_buddy/")
 client = QdrantClient(":memory:")
 # Spotify API setup
 sp = spotipy.Spotify(
@@ -87,16 +92,24 @@ config = {
 }
 
 mem0 = Memory.from_config(config)
-
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
 # Define the State
 class State(TypedDict):
     messages: Annotated[List[HumanMessage | AIMessage], add_messages]
     mem0_user_id: str
 
-
 graph = StateGraph(State)
 
+chat_history = []
+
+def transform_data(data):
+    transformed = []
+    for item in data:
+        # Create the string with square brackets instead of curly braces, and remove quotes
+        transformed_item = f"[{item['destination']}, relation: {item['relation']}, source: {item['source']}]"
+        transformed.append(transformed_item)
+    return transformed
 
 def chatbot(state: State):
     messages = state["messages"]
@@ -106,13 +119,17 @@ def chatbot(state: State):
     # Retrieve relevant memories
     memories = mem0.search(messages[-1].content, user_id=user_id, limit=5)
     context = "Relevant information from previous conversations:\n"
-    print(memories["entities"])
-    # for memory in memories:
-    #     context += f"- {memory['memory']}\n"
-    #     print(memory["memory"])
+    if memories['entities']:
+        context += "Entities:\n"
+        context += f"{transform_data(memories['entities'])}"
+    if memories['memories']:
+        context += "Memories:\n"
+        for memory in memories['memories']:
+            context += f"- {memory['memory']}\n"
+
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", drive_buddy_main_prompt + context),
+            ("system", drive_buddy_main_prompt),
             ("placeholder", "{chat_history}"),
             ("human", messages[-1].content),
             ("placeholder", "{agent_scratchpad}"),
@@ -122,34 +139,28 @@ def chatbot(state: State):
     agent = create_tool_calling_agent(llm, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-    # system_message = SystemMessage(content=drive_buddy_main_prompt + context)
-    # full_messages = [system_message] + messages
-
-    # Invoke GPT with function calling enabled
-    # response = agent_executor.invoke(full_messages)
-
+    chat_history.append(HumanMessage(messages[-1].content))
     response = agent_executor.invoke(
         {
             "input": messages,
+            "chat_history": chat_history,
         }
     )
+    chat_history.append(AIMessage(response["output"]))
+    mem0.add(f"User: {messages[-1].content}\nAssistant: {response["output"]}",
+              user_id=user_id)
     return {"messages": [AIMessage(content=response["output"])]}
 
 
-# Add nodes to the graph
+
 graph.add_node("chatbot", chatbot)
-
-# Add edge from START to chatbot
 graph.add_edge(START, "chatbot")
-
-# Add edge from chatbot back to itself
 graph.add_edge("chatbot", "chatbot")
-
 compiled_graph = graph.compile()
 
 
 def run_conversation(user_input: str, mem0_user_id: str):
-    config = {"configurable": {"thread_id": mem0_user_id}}
+    config = {"configurable": {"thread_id": mem0_user_id}}    
     state = {
         "messages": [HumanMessage(content=user_input)],
         "mem0_user_id": mem0_user_id,
@@ -158,25 +169,32 @@ def run_conversation(user_input: str, mem0_user_id: str):
     for event in compiled_graph.stream(state, config):
         for value in event.values():
             if value.get("messages"):
-                # print("\n\nDrive Buddy:", value)
-                # recorder.gpt_speech(value["messages"][-1].content)
+                # print("\n\nDrive Buddy:", value.get("messages")[-1].content)
+                # recorder.gpt_speech(value["messages"][-1].cont
+                # ent)
                 return  # Exit after printing the response
+            
 
 
 if __name__ == "__main__":
-    print("Welcome to Drive Buddy! How can I assist you today?\n")
-    mem0_user_id = "mustafa_gumustas"
-    while True:
-        recorder = SpeechRecorder()
-        try:
-            # text = recorder.record()
-            text = input("Enter your message: \n")
 
+    mem0_user_id = "anil_ahmet"
+    while True:
+        # recorder = SpeechRecorder()
+        # try:
+            # text = recorder.record()
+        if first_run == False:
+            text = input("Enter your message: \n")
+        else:
+            user_info = mem0.search(f"who is {mem0_user_id}", user_id=mem0_user_id, limit=5)
+            pprint(transform_data(user_info["entities"][:10]))
+            text = f"""Hello this is {mem0_user_id}. I m gonna provide information about my self from our past conversations. Please use these infromations to great me. {transform_data(user_info["entities"][:10])}"""
+            first_run = False
             # print(f"Transcribed text: {text}")
             # pprint(mem0.get_all())
             # recorder.close()
-        finally:
-            recorder.close()
+        # finally:
+        #     recorder.close()
         user_input = text
 
         if user_input.lower() in ["quit", "exit", "bye"]:
