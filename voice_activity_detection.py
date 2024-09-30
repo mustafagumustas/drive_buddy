@@ -98,7 +98,7 @@ class SpeechRecorder:
 
     def gpt_speech(self, gpt_response_text):
         with client.audio.speech.with_streaming_response.create(
-            model="tts-1",
+            model="tts-1-hd",
             voice="alloy",
             input=gpt_response_text
         ) as response:
